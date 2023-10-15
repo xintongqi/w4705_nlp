@@ -1,0 +1,16 @@
+# Startsymbols
+TOP ; 1.0
+
+# Phrasal rules
+ADJP -> ASEARLY PP ; 0.0588235294118
+ADJP -> INTERESTED PP ; 0.0588235294118
+ADJP -> LESS PP ; 0.117647058824
+ADJP -> better ; 0.117647058824
+ADJP -> extra ; 0.0588235294118
+ADJP -> last ; 0.176470588235
+ADJP -> nonstop ; 0.352941176471
+ADJP -> possible ; 0.0588235294118
+ASEARLY -> haha ; 1
+PP -> lala ; 1
+INTERESTED -> hmmm ; 1
+LESS -> test ; 1
