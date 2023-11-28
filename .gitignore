@@ -1,3 +1,11 @@
+# repo specific files
+/hw3/data/
+/hw3/result.txt
+/hw3/submit/
+/hw4/Archive.zip
+/hw4/GoogleNews-vectors-negative300.bin.gz
+
+
 ### JetBrains template
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio, WebStorm and Rider
 # Reference: https://intellij-support.jetbrains.com/hc/en-us/articles/206544839

@@ -60,7 +60,8 @@ def wn_frequency_predictor(context: Context) -> str:
     return max(freq_dic, key=freq_dic.get)
 
 
-def wn_simple_lesk_predictor(context):
+def wn_simple_lesk_predictor(context: Context) -> str:
+    # Part 3
     stop_words = set(stopwords.words('english'))
 
     target_word = context.lemma
@@ -84,9 +85,7 @@ def wn_simple_lesk_predictor(context):
 
         tokens_def = tokenize(definition)
         definition_filtered = [word for word in tokens_def if word not in stop_words]
-
-        overlap = len(set(context_tokens) & set(definition_filtered))
-        overlap_list[lemma] = overlap
+        overlap_list[lemma] = len(set(context_tokens) & set(definition_filtered))
 
     max_overlap = max(overlap_list.values())
     best_candidates = [lemma for lemma, overlap in overlap_list.items() if overlap == max_overlap]
@@ -108,6 +107,7 @@ class Word2VecSubst(object):
         self.model = gensim.models.KeyedVectors.load_word2vec_format(filename, binary=True)
 
     def predict_nearest(self, context: Context) -> str:
+        # Part 4
         similarity_scores = {}
         candidates = get_candidates(context.lemma, context.pos)
 
@@ -117,23 +117,21 @@ class Word2VecSubst(object):
             except KeyError:
                 continue
 
-        # sorted_similarity_scores = dict(sorted(similarity_scores.items(), key=lambda x: x[1], reverse=True))
-        # most_similar_candidate = list(sorted_similarity_scores.keys())[0] if sorted_similarity_scores else None
         most_similar_candidate = max(similarity_scores, key=similarity_scores.get)
         return most_similar_candidate
 
     def predict_nearest_improved(self, context: Context) -> str:
+        # Part 6
         similarity_scores = {}
         candidates = get_candidates(context.lemma, context.pos)
 
         for candidate in candidates:
             try:
-                similarity_scores[candidate] = self.model.similarity(context.lemma, candidate) / (
-                        self.model.wv[context.lemma].norm() * self.model.wv[candidate].norm()
-                )
-                # context_vector = self.model[context.lemma] / self.model[context.lemma].sum()
-                # candidate_vector = self.model[candidate] / self.model[candidate].sum()
-                # similarity_scores[candidate] = context_vector.dot(candidate_vector)
+                similarity_score = self.model.similarity(context.lemma, candidate)
+                if similarity_score > 0.8:
+                    similarity_scores[candidate] = 0.8
+                else:
+                    similarity_scores[candidate] = similarity_score
             except KeyError:
                 continue
 
@@ -148,6 +146,7 @@ class BertPredictor(object):
         self.model = transformers.TFDistilBertForMaskedLM.from_pretrained('distilbert-base-uncased')
 
     def predict(self, context: Context) -> str:
+        # Part 5
         candidates = get_candidates(context.lemma, context.pos)
 
         left_ctxt = ' '.join([i if i.isalpha() else i for i in context.left_context])
@@ -172,8 +171,8 @@ if __name__ == "__main__":
 
     # At submission time, this program should run your best predictor (part 6).
 
-    # W2VMODEL_FILENAME = 'GoogleNews-vectors-negative300.bin.gz'
-    # predictor = Word2VecSubst(W2VMODEL_FILENAME)
+    W2VMODEL_FILENAME = 'GoogleNews-vectors-negative300.bin.gz'
+    predictor = Word2VecSubst(W2VMODEL_FILENAME)
 
     # # Smurf_predictor
     # for context in read_lexsub_xml(sys.argv[1]):
@@ -196,11 +195,10 @@ if __name__ == "__main__":
     #     prediction = wn_simple_lesk_predictor(context)
     #     print("{}.{} {} :: {}".format(context.lemma, context.pos, context.cid, prediction))
 
-    # Test part 4
-    for context in read_lexsub_xml(sys.argv[1]):
-        model = Word2VecSubst('GoogleNews-vectors-negative300.bin.gz')
-        prediction = model.predict_nearest(context)
-        print("{}.{} {} :: {}".format(context.lemma, context.pos, context.cid, prediction))
+    # # Test part 4 [0.115/0.170]
+    # for context in read_lexsub_xml(sys.argv[1]):
+    #     prediction = predictor.predict_nearest(context)
+    #     print("{}.{} {} :: {}".format(context.lemma, context.pos, context.cid, prediction))
 
     # # Test part 5 [0.115/0.170]
     # for context in read_lexsub_xml(sys.argv[1]):
@@ -208,8 +206,7 @@ if __name__ == "__main__":
     #     prediction = model.predict(context)
     #     print("{}.{} {} :: {}".format(context.lemma, context.pos, context.cid, prediction))
 
-    # # Test part 6
-    # for context in read_lexsub_xml(sys.argv[1]):
-    #     model = Word2VecSubst('GoogleNews-vectors-negative300.bin.gz')
-    #     prediction = model.predict_nearest_improved(context)
-    #     print("{}.{} {} :: {}".format(context.lemma, context.pos, context.cid, prediction))
+    # Test part 6 [0.170/0.170]
+    for context in read_lexsub_xml(sys.argv[1]):
+        prediction = predictor.predict_nearest_improved(context)
+        print("{}.{} {} :: {}".format(context.lemma, context.pos, context.cid, prediction))
