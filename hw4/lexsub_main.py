@@ -10,7 +10,7 @@ from nltk.corpus import wordnet as wn
 from nltk.corpus import stopwords
 
 import numpy as np
-import tensorflow
+# import tensorflow
 
 import gensim
 import transformers
@@ -60,58 +60,46 @@ def wn_frequency_predictor(context: Context) -> str:
     return max(freq_dic, key=freq_dic.get)
 
 
-def wn_simple_lesk_predictor(context: Context) -> str:
-    # Part 3
-    # remove stop words
-    stop_words = stopwords.words('english')
-    con = context.left_context + context.right_context
-    filtered_con = set([x for x in con if x not in stop_words])
+def wn_simple_lesk_predictor(context):
+    stop_words = set(stopwords.words('english'))
 
-    # count overlaps
-    overlap_dict = defaultdict()
-    lemmas = wn.lemmas(context.lemma, context.pos)
-    for lem in lemmas:
-        s = lem.synset()
-        # get definition of the synset
-        definition = s.definition()
-        # add all examples
-        for e in s.examples():
-            definition += (' ' + e)
-        # add all hypernyms
-        for h in s.hyponyms():
-            definition += (' ' + h.definition())
-        # process definition into dictionary
-        tokenized_def = tokenize(definition)
-        filtered_def = set([x for x in tokenized_def if x not in stop_words])
-        overlap_dict[lem] = len(filtered_con & filtered_def)
+    target_word = context.lemma
+    context_tokens = [token for token in context.left_context + context.right_context if
+                      token not in stop_words]
 
-    # return values
-    max_overlap_value = max(overlap_dict.values(), default=0)
-    max_count = defaultdict(int)
-    max_synset = None
+    overlap_list = defaultdict(int)
+    for lemma in wn.lemmas(context.lemma, context.pos):
+        syn = lemma.synset()
+        definition = syn.definition()
+        examples = syn.examples()
+        hypernyms = syn.hypernyms()
 
-    if max_overlap_value > 0:
-        max_overlap = max(overlap_dict, key=overlap_dict.get)
-        max_synset = max_overlap.synset()
-    else:
-        lemma_count = defaultdict(int)
-        for syn in wn.synsets(context.lemma, context.pos):
-            for lemma in syn.lemmas():
-                if lemma.name() == context.lemma:
-                    continue
-                lemma_count[lemma] += lemma.count()
-        if lemma_count:
-            max_lemma = max(lemma_count, key=lemma_count.get)
-            max_synset = max_lemma.synset()
+        for ex in examples:
+            definition += " " + ex
 
-    if max_synset:
-        max_count = defaultdict(int)
-        for lemma in max_synset.lemmas():
-            if lemma.name() == context.lemma:
-                continue
-            max_count[lemma.name()] += lemma.count()
+        for hypernym in hypernyms:
+            definition += " " + hypernym.definition()
+            for hypernym_ex in hypernym.examples():
+                definition += " " + hypernym_ex
 
-    return max(max_count, key=max_count.get, default='defaultsetting')
+        tokens_def = tokenize(definition)
+        definition_filtered = [word for word in tokens_def if word not in stop_words]
+
+        overlap = len(set(context_tokens) & set(definition_filtered))
+        overlap_list[lemma] = overlap
+
+    max_overlap = max(overlap_list.values())
+    best_candidates = [lemma for lemma, overlap in overlap_list.items() if overlap == max_overlap]
+
+    if best_candidates:
+        counts = {l.name(): l.count() for lemma in best_candidates for l in lemma.synset().lemmas()}
+        sorted_counts = dict(sorted(counts.items(), key=lambda x: x[1], reverse=True))
+
+        for candidate in sorted_counts.keys():
+            if candidate != target_word:
+                return candidate.replace('_', ' ')
+
+    return target_word
 
 
 class Word2VecSubst(object):
@@ -120,7 +108,37 @@ class Word2VecSubst(object):
         self.model = gensim.models.KeyedVectors.load_word2vec_format(filename, binary=True)
 
     def predict_nearest(self, context: Context) -> str:
-        return None  # replace for part 4
+        similarity_scores = {}
+        candidates = get_candidates(context.lemma, context.pos)
+
+        for candidate in candidates:
+            try:
+                similarity_scores[candidate] = self.model.similarity(context.lemma, candidate)
+            except KeyError:
+                continue
+
+        # sorted_similarity_scores = dict(sorted(similarity_scores.items(), key=lambda x: x[1], reverse=True))
+        # most_similar_candidate = list(sorted_similarity_scores.keys())[0] if sorted_similarity_scores else None
+        most_similar_candidate = max(similarity_scores, key=similarity_scores.get)
+        return most_similar_candidate
+
+    def predict_nearest_improved(self, context: Context) -> str:
+        similarity_scores = {}
+        candidates = get_candidates(context.lemma, context.pos)
+
+        for candidate in candidates:
+            try:
+                similarity_scores[candidate] = self.model.similarity(context.lemma, candidate) / (
+                        self.model.wv[context.lemma].norm() * self.model.wv[candidate].norm()
+                )
+                # context_vector = self.model[context.lemma] / self.model[context.lemma].sum()
+                # candidate_vector = self.model[candidate] / self.model[candidate].sum()
+                # similarity_scores[candidate] = context_vector.dot(candidate_vector)
+            except KeyError:
+                continue
+
+        most_similar_candidate = max(similarity_scores, key=similarity_scores.get)
+        return most_similar_candidate
 
 
 class BertPredictor(object):
@@ -130,7 +148,24 @@ class BertPredictor(object):
         self.model = transformers.TFDistilBertForMaskedLM.from_pretrained('distilbert-base-uncased')
 
     def predict(self, context: Context) -> str:
-        return None  # replace for part 5
+        candidates = get_candidates(context.lemma, context.pos)
+
+        left_ctxt = ' '.join([i if i.isalpha() else i for i in context.left_context])
+        right_ctxt = ' '.join([j if j.isalpha() else j for j in context.right_context])
+        ctxt = f"{left_ctxt} [MASK] {right_ctxt}"
+
+        input_toks = self.tokenizer.encode(ctxt)
+        sent_tokenized = self.tokenizer.convert_ids_to_tokens(input_toks)
+        mask_idx = sent_tokenized.index('[MASK]')
+
+        input_mat = np.array(input_toks).reshape((1, -1))
+        outputs = self.model.predict(input_mat)
+        predictions = outputs[0]
+
+        best_probs = np.argsort(predictions[0][mask_idx])[::-1]
+        best_words = self.tokenizer.convert_ids_to_tokens(best_probs)
+
+        return next((word.replace('_', ' ') for word in best_words if word.replace('_', ' ') in candidates), '')
 
 
 if __name__ == "__main__":
@@ -149,14 +184,32 @@ if __name__ == "__main__":
     # # Test part 1
     # print(get_candidates('slow', 'a'))
 
-    # # Test part 2
+    # # Test part 2 [0.098/0.136]
     # for context in read_lexsub_xml(sys.argv[1]):
     #     # print(context)  # useful for debugging
     #     prediction = wn_frequency_predictor(context)
     #     print("{}.{} {} :: {}".format(context.lemma, context.pos, context.cid, prediction))
 
-    # Test part 3
+    # # Test part 3 [0.102/0.136]
+    # for context in read_lexsub_xml(sys.argv[1]):
+    #     # print(context)  # useful for debugging
+    #     prediction = wn_simple_lesk_predictor(context)
+    #     print("{}.{} {} :: {}".format(context.lemma, context.pos, context.cid, prediction))
+
+    # Test part 4
     for context in read_lexsub_xml(sys.argv[1]):
-        # print(context)  # useful for debugging
-        prediction = wn_simple_lesk_predictor(context)
+        model = Word2VecSubst('GoogleNews-vectors-negative300.bin.gz')
+        prediction = model.predict_nearest(context)
         print("{}.{} {} :: {}".format(context.lemma, context.pos, context.cid, prediction))
+
+    # # Test part 5 [0.115/0.170]
+    # for context in read_lexsub_xml(sys.argv[1]):
+    #     model = BertPredictor()
+    #     prediction = model.predict(context)
+    #     print("{}.{} {} :: {}".format(context.lemma, context.pos, context.cid, prediction))
+
+    # # Test part 6
+    # for context in read_lexsub_xml(sys.argv[1]):
+    #     model = Word2VecSubst('GoogleNews-vectors-negative300.bin.gz')
+    #     prediction = model.predict_nearest_improved(context)
+    #     print("{}.{} {} :: {}".format(context.lemma, context.pos, context.cid, prediction))
